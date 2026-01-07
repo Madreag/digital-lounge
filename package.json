@@ -1,0 +1,38 @@
+{
+  "name": "@digital-lounge/avatar",
+  "version": "0.1.0",
+  "description": "3D player avatar system for Digital Lounge",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "three": "^0.160.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.160.0",
+    "typescript": "^5.3.3"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "keywords": [
+    "three.js",
+    "avatar",
+    "multiplayer",
+    "3d",
+    "digital-lounge"
+  ],
+  "license": "MIT"
+}
