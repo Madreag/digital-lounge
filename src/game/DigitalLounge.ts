@@ -71,7 +71,17 @@ export class DigitalLounge {
   }
 
   private setupKeyboardControls(): void {
+    // Helper to check if an input element is focused
+    const isInputFocused = (): boolean => {
+      const activeElement = document.activeElement;
+      return activeElement instanceof HTMLInputElement ||
+             activeElement instanceof HTMLTextAreaElement;
+    };
+
     document.addEventListener('keydown', (event) => {
+      // Don't handle movement keys when typing in chat
+      if (isInputFocused()) return;
+
       switch (event.code) {
         case 'KeyW':
         case 'ArrowUp':

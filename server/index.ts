@@ -22,6 +22,18 @@ import {
   PlayerPositionUpdate,
   isPlayerMessage,
 } from '../src/lib/player/types.js';
+import {
+  ChatMessageType,
+  ChatSendMessage,
+  ChatWhisperMessage,
+  ChatEmoteMessage,
+  ChatBroadcastMessage,
+  ChatSystemMessage,
+  ChatErrorMessage,
+  isChatMessage,
+  createChatMessage,
+  SystemMessages,
+} from '../src/lib/chat/types.js';
 import { PlayerRegistry } from './PlayerRegistry.js';
 
 const PORT = Number(process.env.WS_PORT) || 8080;
@@ -102,6 +114,21 @@ class LoungeServer {
         clientId
       );
 
+      // Send system chat message for player join
+      const joinChatMsg = createChatMessage(
+        'server',
+        'System',
+        SystemMessages.playerJoin(client.username),
+        'system'
+      );
+      this.broadcast(
+        createMessage<ChatSystemMessage>(
+          ChatMessageType.CHAT_SYSTEM,
+          joinChatMsg,
+          'server'
+        )
+      );
+
       socket.on('message', (data) => this.handleMessage(client, data.toString()));
       socket.on('close', (code, reason) => this.handleDisconnect(client, code, reason.toString()));
       socket.on('error', (err) => this.handleError(client, err));
@@ -152,8 +179,134 @@ class LoungeServer {
       return;
     }
 
+    // Handle chat messages
+    if (isChatMessage(msg)) {
+      this.handleChatMessage(client, msg);
+      return;
+    }
+
     // Unknown application messages - broadcast to all other clients
     this.broadcast(msg, client.id);
+  }
+
+  private handleChatMessage(client: ClientConnection, msg: BaseMessage): void {
+    switch (msg.type) {
+      case ChatMessageType.CHAT_SEND: {
+        const sendMsg = msg as ChatSendMessage;
+        const chatMsg = createChatMessage(
+          client.id,
+          client.username,
+          sendMsg.payload.content,
+          'chat'
+        );
+
+        // Broadcast to all clients including sender
+        this.broadcast(
+          createMessage<ChatBroadcastMessage>(
+            ChatMessageType.CHAT_MESSAGE,
+            chatMsg,
+            'server'
+          )
+        );
+        break;
+      }
+
+      case ChatMessageType.CHAT_WHISPER: {
+        const whisperMsg = msg as ChatWhisperMessage;
+        const { targetId, targetName, content } = whisperMsg.payload;
+
+        // Find target by ID or name
+        let targetClient: ClientConnection | undefined;
+        if (targetId) {
+          targetClient = this.clients.get(targetId);
+        } else if (targetName) {
+          for (const c of this.clients.values()) {
+            if (c.username.toLowerCase() === targetName.toLowerCase()) {
+              targetClient = c;
+              break;
+            }
+          }
+        }
+
+        if (!targetClient) {
+          // Send error back to sender
+          this.sendTo(
+            client,
+            createMessage<ChatErrorMessage>(
+              ChatMessageType.CHAT_ERROR,
+              {
+                code: 'PLAYER_NOT_FOUND',
+                message: SystemMessages.playerNotFound(targetName || targetId || 'unknown'),
+              },
+              'server'
+            )
+          );
+          return;
+        }
+
+        // Create whisper message
+        const chatMsg = createChatMessage(
+          client.id,
+          client.username,
+          content,
+          'whisper',
+          targetClient.id,
+          targetClient.username
+        );
+
+        // Send to target
+        this.sendTo(
+          targetClient,
+          createMessage<ChatBroadcastMessage>(
+            ChatMessageType.CHAT_MESSAGE,
+            chatMsg,
+            'server'
+          )
+        );
+
+        // Send confirmation to sender (with swapped target info for display)
+        const senderChatMsg = createChatMessage(
+          client.id,
+          client.username,
+          content,
+          'whisper',
+          targetClient.id,
+          targetClient.username
+        );
+        this.sendTo(
+          client,
+          createMessage<ChatBroadcastMessage>(
+            ChatMessageType.CHAT_MESSAGE,
+            senderChatMsg,
+            'server'
+          )
+        );
+        break;
+      }
+
+      case ChatMessageType.CHAT_EMOTE: {
+        const emoteMsg = msg as ChatEmoteMessage;
+        const chatMsg = createChatMessage(
+          client.id,
+          client.username,
+          emoteMsg.payload.action,
+          'emote'
+        );
+
+        // Broadcast to all clients
+        this.broadcast(
+          createMessage<ChatBroadcastMessage>(
+            ChatMessageType.CHAT_MESSAGE,
+            chatMsg,
+            'server'
+          )
+        );
+        break;
+      }
+
+      default:
+        console.warn(`[Server] Unknown chat message type: ${msg.type}`);
+    }
   }
 
   private handlePlayerMessage(client: ClientConnection, msg: BaseMessage): void {
@@ -194,6 +347,8 @@ class LoungeServer {
   private handleDisconnect(client: ClientConnection, code: number, reason: string): void {
     console.log(`[Server] Client disconnected: ${client.id} (code: ${code}, reason: ${reason})`);
 
+    const username = client.username;
+
     // Remove from registry
     this.playerRegistry.removePlayer(client.id);
     this.clients.delete(client.id);
@@ -203,6 +358,21 @@ class LoungeServer {
       createMessage<PlayerLeaveMessage>(
         PlayerMessageType.PLAYER_LEAVE,
         { id: client.id, reason },
+        'server'
+      )
+    );
+
+    // Send system chat message for player leave
+    const leaveChatMsg = createChatMessage(
+      'server',
+      'System',
+      SystemMessages.playerLeave(username),
+      'system'
+    );
+    this.broadcast(
+      createMessage<ChatSystemMessage>(
+        ChatMessageType.CHAT_SYSTEM,
+        leaveChatMsg,
         'server'
       )
     );
