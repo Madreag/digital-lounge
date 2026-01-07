@@ -1,0 +1,174 @@
+formula = "multiplayer-lounge"
+description = "Multiplayer 3D lounge where players connect and chat in shared virtual space"
+
+[[steps]]
+id = "networking-core"
+title = "WebSocket Server & Client Setup"
+description = """
+Set up real-time networking infrastructure.
+- Create WebSocket server (Node.js + ws or Socket.io)
+- Define message protocol: { type, payload, timestamp, senderId }
+- Implement connection/disconnection handling
+- Add heartbeat/ping-pong for connection health
+- Create client-side WebSocket wrapper with auto-reconnect
+"""
+
+[[steps]]
+id = "player-state"
+title = "Player State Sync System"
+needs = ["networking-core"]
+description = """
+Implement player state management and synchronization.
+- Define Player schema: { id, username, position: {x,y,z}, rotation: {x,y,z}, avatar, status }
+- Create server-side player registry (Map<playerId, PlayerState>)
+- Implement state broadcast (30fps tick rate for positions)
+- Add interpolation on client for smooth remote player movement
+- Handle player join/leave events with proper cleanup
+"""
+
+[[steps]]
+id = "3d-scene"
+title = "Three.js 3D Lounge Scene"
+description = """
+Build the 3D virtual lounge environment.
+- Initialize Three.js scene, camera (PerspectiveCamera), renderer
+- Create lounge geometry: floor plane, ambient lighting, skybox
+- Add furniture/decoration meshes (couches, tables, plants)
+- Implement OrbitControls or custom WASD+mouse camera
+- Set up render loop with requestAnimationFrame
+"""
+
+[[steps]]
+id = "player-avatars"
+title = "3D Player Avatars"
+needs = ["3d-scene", "player-state"]
+description = """
+Create and manage player representations in 3D space.
+- Design simple avatar mesh (capsule + nametag sprite)
+- Create AvatarManager class to spawn/despawn avatar meshes
+- Sync avatar positions from PlayerState to Three.js transforms
+- Add smooth lerp interpolation for remote player movement
+- Display username label above each avatar (CSS2DRenderer or sprite)
+"""
+
+[[steps]]
+id = "local-movement"
+title = "Local Player Movement"
+needs = ["player-avatars"]
+description = """
+Implement first-person or third-person player controls.
+- WASD keyboard movement with configurable speed
+- Mouse look (pointer lock API) for camera rotation
+- Collision detection against lounge boundaries
+- Emit position updates to server on movement (throttled ~30fps)
+- Optional: jump, crouch, sprint modifiers
+"""
+
+[[steps]]
+id = "connect-screen"
+title = "Connect Screen UI"
+needs = ["networking-core"]
+description = """
+Build the pre-game connection interface.
+- Create ConnectScreen React component
+- Username input field with validation (3-16 chars, alphanumeric)
+- Server status indicator (connected/connecting/error)
+- [ ENTER LOUNGE ] button - disabled until valid username + connected
+- Display player count: "12 players online"
+- Animated background (subtle 3D scene preview or gradient)
+"""
+
+[[steps]]
+id = "chat-system"
+title = "Real-Time Chat System"
+needs = ["networking-core", "player-state"]
+description = """
+Implement multiplayer text chat.
+- Chat message schema: { id, senderId, senderName, content, timestamp, type }
+- Server broadcast for public messages
+- Client chat state (Zustand/Redux): messages[], inputValue
+- Chat UI: scrollable message list, input field, send button
+- Message types: chat, system (join/leave), whisper
+- Commands: /me <action>, /w <player> <msg>
+"""
+
+[[steps]]
+id = "chat-ui-3d"
+title = "3D-Integrated Chat Overlay"
+needs = ["chat-system", "3d-scene"]
+description = """
+Overlay chat UI on the 3D lounge view.
+- Semi-transparent chat panel (bottom-left, draggable)
+- Auto-scroll to latest messages
+- Typing indicator when input focused
+- Optional: speech bubbles above avatars for recent messages
+- Keyboard shortcut: Enter to focus chat, Escape to unfocus
+- Preserve chat history across scene transitions
+"""
+
+[[steps]]
+id = "proximity-features"
+title = "Proximity-Based Interactions"
+needs = ["player-avatars", "chat-ui-3d"]
+description = """
+Add spatial awareness features.
+- Proximity chat: messages from nearby players appear larger/brighter
+- Player list sorted by distance
+- "Nearby" indicator on player nameplates
+- Optional: spatial audio falloff for voice chat prep
+- Click on avatar to view profile or start whisper
+"""
+
+[[steps]]
+id = "presence-indicators"
+title = "Player Presence & Status"
+needs = ["player-state", "connect-screen"]
+description = """
+Show who's in the lounge and their status.
+- Online player list panel (collapsible sidebar)
+- Status indicators: active, idle, away (auto-detect from input)
+- "X is typing..." indicator in chat
+- Join/leave notifications in chat feed
+- Player count in header: "The Lounge (14 online)"
+"""
+
+[[steps]]
+id = "polish-ux"
+title = "Polish & User Experience"
+needs = ["chat-ui-3d", "local-movement", "presence-indicators"]
+description = """
+Final UX polish pass.
+- Loading states and skeleton screens
+- Error handling with user-friendly messages
+- Responsive layout (hide 3D on mobile, show chat-only)
+- Settings panel: username change, avatar color, chat opacity
+- Sound effects: join chime, message notification
+- Performance optimization: frustum culling, LOD for distant avatars
+"""
+
+[[steps]]
+id = "test-multiplayer"
+title = "Multiplayer Testing"
+needs = ["polish-ux"]
+description = """
+Test with multiple concurrent users.
+- Spawn multiple browser tabs to simulate players
+- Verify position sync accuracy and latency
+- Test edge cases: rapid connect/disconnect, network drop
+- Load test: 20+ simultaneous connections
+- Cross-browser compatibility (Chrome, Firefox, Safari)
+"""
+
+[[steps]]
+id = "deploy-ready"
+title = "Deployment Preparation"
+needs = ["test-multiplayer"]
+description = """
+Prepare for production deployment.
+- Environment config: WS_URL, MAX_PLAYERS
+- HTTPS/WSS for secure connections
+- Rate limiting on server (messages per second)
+- Connection limits and queue for full lounge
+- Documentation: README with setup instructions
+- Create PR with feature branch
+"""
