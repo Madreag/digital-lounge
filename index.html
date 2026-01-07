@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Digital Lounge - Presence</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      }
+
+      /* Northern lights effect */
+      body::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background:
+          radial-gradient(ellipse at 20% 20%, rgba(0, 255, 255, 0.1) 0%, transparent 50%),
+          radial-gradient(ellipse at 80% 80%, rgba(255, 0, 255, 0.1) 0%, transparent 50%),
+          radial-gradient(ellipse at 50% 50%, rgba(0, 255, 136, 0.05) 0%, transparent 60%);
+        animation: aurora 20s ease-in-out infinite alternate;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      @keyframes aurora {
+        0% {
+          background-position: 0% 0%;
+          opacity: 0.8;
+        }
+        50% {
+          opacity: 1;
+        }
+        100% {
+          background-position: 100% 100%;
+          opacity: 0.8;
+        }
+      }
+
+      /* Scanline overlay */
+      body::after {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: repeating-linear-gradient(
+          0deg,
+          transparent,
+          transparent 2px,
+          rgba(0, 0, 0, 0.03) 2px,
+          rgba(0, 0, 0, 0.03) 4px
+        );
+        pointer-events: none;
+        z-index: 1;
+      }
+
+      #app {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        z-index: 2;
+      }
+
+      /* Header */
+      .header {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 300px;
+        height: 60px;
+        background: rgba(0, 0, 0, 0.3);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        align-items: center;
+        padding: 0 24px;
+        z-index: 100;
+        backdrop-filter: blur(10px);
+      }
+
+      .header-title {
+        font-size: 24px;
+        font-weight: bold;
+        color: #ff00ff;
+        text-shadow: 0 0 20px rgba(255, 0, 255, 0.5);
+        letter-spacing: 2px;
+      }
+
+      .header-subtitle {
+        margin-left: 16px;
+        font-size: 14px;
+        color: #888888;
+      }
+
+      .connection-status {
+        margin-left: auto;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .connection-status.connected {
+        background: rgba(0, 255, 136, 0.2);
+        color: #00ff88;
+        border: 1px solid rgba(0, 255, 136, 0.3);
+      }
+
+      .connection-status.connecting,
+      .connection-status.reconnecting {
+        background: rgba(255, 170, 0, 0.2);
+        color: #ffaa00;
+        border: 1px solid rgba(255, 170, 0, 0.3);
+      }
+
+      .connection-status.disconnected {
+        background: rgba(255, 102, 102, 0.2);
+        color: #ff6666;
+        border: 1px solid rgba(255, 102, 102, 0.3);
+      }
+
+      /* Main content area */
+      .main-content {
+        position: fixed;
+        top: 60px;
+        left: 0;
+        right: 300px;
+        bottom: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+
+      .welcome-message {
+        text-align: center;
+        max-width: 500px;
+      }
+
+      .welcome-message h2 {
+        font-size: 32px;
+        color: #00ffff;
+        text-shadow: 0 0 30px rgba(0, 255, 255, 0.4);
+        margin-bottom: 16px;
+      }
+
+      .welcome-message p {
+        font-size: 16px;
+        color: #aaaaaa;
+        line-height: 1.6;
+      }
+
+      /* Chat input area */
+      .chat-area {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 300px;
+        height: 60px;
+        background: rgba(0, 0, 0, 0.3);
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        align-items: center;
+        padding: 0 24px;
+        gap: 12px;
+        backdrop-filter: blur(10px);
+      }
+
+      #chat-input {
+        flex: 1;
+        height: 40px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 20px;
+        padding: 0 20px;
+        font-size: 14px;
+        color: #ffffff;
+        outline: none;
+        transition: all 0.2s ease;
+      }
+
+      #chat-input:focus {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(0, 255, 255, 0.3);
+        box-shadow: 0 0 20px rgba(0, 255, 255, 0.1);
+      }
+
+      #chat-input::placeholder {
+        color: #666666;
+      }
+
+      .send-btn {
+        width: 40px;
+        height: 40px;
+        background: linear-gradient(135deg, #ff00ff 0%, #00ffff 100%);
+        border: none;
+        border-radius: 50%;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s ease;
+      }
+
+      .send-btn:hover {
+        transform: scale(1.1);
+        box-shadow: 0 0 20px rgba(255, 0, 255, 0.4);
+      }
+
+      .send-btn svg {
+        color: white;
+      }
+
+      /* Loading screen */
+      #loading {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: #1a1a2e;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        transition: opacity 0.5s ease;
+      }
+
+      #loading.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .loading-content {
+        text-align: center;
+      }
+
+      .loading-spinner {
+        width: 60px;
+        height: 60px;
+        border: 3px solid rgba(255, 0, 255, 0.2);
+        border-top-color: #ff00ff;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 20px;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+
+      .loading-text {
+        color: #00ffff;
+        font-size: 18px;
+        text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="loading">
+      <div class="loading-content">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Entering Digital Lounge...</div>
+      </div>
+    </div>
+
+    <div id="app">
+      <header class="header">
+        <h1 class="header-title">DIGITAL LOUNGE</h1>
+        <span class="header-subtitle">Virtual Hangout Space</span>
+        <span id="connection-status" class="connection-status disconnected">Disconnected</span>
+      </header>
+
+      <main class="main-content">
+        <div class="welcome-message">
+          <h2>Welcome to the Lounge</h2>
+          <p>
+            This is your virtual hangout space. See who's online in the sidebar,
+            watch for typing indicators, and get notified when friends join or leave.
+          </p>
+        </div>
+      </main>
+
+      <div class="chat-area">
+        <input
+          type="text"
+          id="chat-input"
+          placeholder="Type a message... (triggers typing indicator)"
+          autocomplete="off"
+        />
+        <button class="send-btn" title="Send message">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+    <script>
+      // Hide loading screen after initialization
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          document.getElementById('loading').classList.add('hidden');
+        }, 1500);
+      });
+    </script>
+  </body>
+</html>
