@@ -1,0 +1,207 @@
+import { WebSocketServer, WebSocket as WS } from 'ws';
+import { randomUUID } from 'crypto';
+import {
+  BaseMessage,
+  SystemMessageType,
+  CloseCode,
+  createMessage,
+  parseMessage,
+  serializeMessage,
+  ConnectMessage,
+  DisconnectMessage,
+  PongMessage,
+  ErrorMessage,
+} from '../src/lib/websocket/protocol.js';
+
+const PORT = Number(process.env.WS_PORT) || 8080;
+const HEARTBEAT_INTERVAL = 30000; // 30 seconds
+const HEARTBEAT_TIMEOUT = 10000; // 10 seconds to respond to ping
+
+interface ClientConnection {
+  id: string;
+  socket: WS;
+  isAlive: boolean;
+  connectedAt: number;
+  lastPingSeq: number;
+  metadata: Record<string, unknown>;
+}
+
+class LoungeServer {
+  private wss: WebSocketServer;
+  private clients: Map<string, ClientConnection> = new Map();
+  private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+
+  constructor(port: number) {
+    this.wss = new WebSocketServer({ port });
+    this.setupServer();
+    this.startHeartbeat();
+    console.log(`[Server] WebSocket server started on port ${port}`);
+  }
+
+  private setupServer(): void {
+    this.wss.on('connection', (socket, request) => {
+      const clientId = randomUUID();
+      const client: ClientConnection = {
+        id: clientId,
+        socket,
+        isAlive: true,
+        connectedAt: Date.now(),
+        lastPingSeq: 0,
+        metadata: {},
+      };
+
+      this.clients.set(clientId, client);
+      console.log(`[Server] Client connected: ${clientId} (${this.clients.size} total)`);
+
+      // Send connection confirmation
+      const connectMsg = createMessage<ConnectMessage>(
+        SystemMessageType.CONNECT,
+        { clientId, serverTime: Date.now() },
+        'server'
+      );
+      this.sendTo(client, connectMsg);
+
+      // Broadcast join to others
+      this.broadcast(
+        createMessage<ConnectMessage>(
+          SystemMessageType.CONNECT,
+          { clientId, serverTime: Date.now() },
+          'server'
+        ),
+        clientId
+      );
+
+      socket.on('message', (data) => this.handleMessage(client, data.toString()));
+      socket.on('close', (code, reason) => this.handleDisconnect(client, code, reason.toString()));
+      socket.on('error', (err) => this.handleError(client, err));
+      socket.on('pong', () => {
+        client.isAlive = true;
+      });
+    });
+
+    this.wss.on('error', (error) => {
+      console.error('[Server] Server error:', error);
+    });
+  }
+
+  private handleMessage(client: ClientConnection, data: string): void {
+    const msg = parseMessage(data);
+    if (!msg) {
+      console.warn(`[Server] Invalid message from ${client.id}:`, data.substring(0, 100));
+      this.sendTo(
+        client,
+        createMessage<ErrorMessage>(
+          SystemMessageType.ERROR,
+          { code: 'INVALID_MESSAGE', message: 'Message could not be parsed' },
+          'server'
+        )
+      );
+      return;
+    }
+
+    // Handle system messages
+    switch (msg.type) {
+      case SystemMessageType.PING:
+        const pongMsg = createMessage<PongMessage>(
+          SystemMessageType.PONG,
+          { seq: (msg.payload as { seq: number }).seq, serverTime: Date.now() },
+          'server'
+        );
+        this.sendTo(client, pongMsg);
+        break;
+
+      case SystemMessageType.PONG:
+        client.isAlive = true;
+        break;
+
+      default:
+        // Application messages - broadcast to all other clients
+        this.broadcast(msg, client.id);
+    }
+  }
+
+  private handleDisconnect(client: ClientConnection, code: number, reason: string): void {
+    console.log(`[Server] Client disconnected: ${client.id} (code: ${code}, reason: ${reason})`);
+    this.clients.delete(client.id);
+
+    // Broadcast disconnect to remaining clients
+    this.broadcast(
+      createMessage<DisconnectMessage>(
+        SystemMessageType.DISCONNECT,
+        { clientId: client.id, reason },
+        'server'
+      )
+    );
+  }
+
+  private handleError(client: ClientConnection, error: Error): void {
+    console.error(`[Server] Client error (${client.id}):`, error.message);
+  }
+
+  private sendTo(client: ClientConnection, msg: BaseMessage): void {
+    if (client.socket.readyState === WS.OPEN) {
+      client.socket.send(serializeMessage(msg));
+    }
+  }
+
+  private broadcast(msg: BaseMessage, excludeId?: string): void {
+    const data = serializeMessage(msg);
+    for (const [id, client] of this.clients) {
+      if (id !== excludeId && client.socket.readyState === WS.OPEN) {
+        client.socket.send(data);
+      }
+    }
+  }
+
+  private startHeartbeat(): void {
+    this.heartbeatInterval = setInterval(() => {
+      for (const [id, client] of this.clients) {
+        if (!client.isAlive) {
+          console.log(`[Server] Client ${id} failed heartbeat, terminating`);
+          client.socket.terminate();
+          this.clients.delete(id);
+          this.broadcast(
+            createMessage<DisconnectMessage>(
+              SystemMessageType.DISCONNECT,
+              { clientId: id, reason: 'heartbeat timeout' },
+              'server'
+            )
+          );
+          continue;
+        }
+
+        client.isAlive = false;
+        client.socket.ping();
+      }
+    }, HEARTBEAT_INTERVAL);
+  }
+
+  public shutdown(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+    }
+
+    for (const client of this.clients.values()) {
+      client.socket.close(CloseCode.GOING_AWAY, 'Server shutting down');
+    }
+
+    this.wss.close();
+    console.log('[Server] Server shut down');
+  }
+}
+
+// Start server
+const server = new LoungeServer(PORT);
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\n[Server] Received SIGINT, shutting down...');
+  server.shutdown();
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('[Server] Received SIGTERM, shutting down...');
+  server.shutdown();
+  process.exit(0);
+});
