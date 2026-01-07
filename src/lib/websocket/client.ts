@@ -11,7 +11,6 @@ import {
   CloseCode,
   ConnectMessage,
   PingMessage,
-  PongMessage,
   createMessage,
   parseMessage,
   serializeMessage,
@@ -50,7 +49,6 @@ export class LoungeClient {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private heartbeatTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private pingSeq = 0;
-  private lastPongTime = 0;
 
   private messageHandlers: Map<string, Set<MessageHandler>> = new Map();
   private stateChangeHandlers: Set<StateChangeHandler> = new Set();
@@ -193,8 +191,6 @@ export class LoungeClient {
           break;
 
         case SystemMessageType.PONG:
-          const pongMsg = msg as PongMessage;
-          this.lastPongTime = Date.now();
           this.clearHeartbeatTimeout();
           break;
 

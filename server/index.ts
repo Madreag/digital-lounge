@@ -12,10 +12,20 @@ import {
   PongMessage,
   ErrorMessage,
 } from '../src/lib/websocket/protocol.js';
+import {
+  PlayerMessageType,
+  PlayerJoinMessage,
+  PlayerLeaveMessage,
+  PlayerStateMessage,
+  PlayerPositionMessage,
+  PlayerBatchPositionMessage,
+  PlayerPositionUpdate,
+  isPlayerMessage,
+} from '../src/lib/player/types.js';
+import { PlayerRegistry } from './PlayerRegistry.js';
 
 const PORT = Number(process.env.WS_PORT) || 8080;
 const HEARTBEAT_INTERVAL = 30000; // 30 seconds
-const HEARTBEAT_TIMEOUT = 10000; // 10 seconds to respond to ping
 
 interface ClientConnection {
   id: string;
@@ -23,6 +33,7 @@ interface ClientConnection {
   isAlive: boolean;
   connectedAt: number;
   lastPingSeq: number;
+  username: string;
   metadata: Record<string, unknown>;
 }
 
@@ -30,16 +41,21 @@ class LoungeServer {
   private wss: WebSocketServer;
   private clients: Map<string, ClientConnection> = new Map();
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  private playerRegistry: PlayerRegistry;
 
   constructor(port: number) {
     this.wss = new WebSocketServer({ port });
+    this.playerRegistry = new PlayerRegistry();
+
     this.setupServer();
     this.startHeartbeat();
+    this.startPlayerBroadcast();
+
     console.log(`[Server] WebSocket server started on port ${port}`);
   }
 
   private setupServer(): void {
-    this.wss.on('connection', (socket, request) => {
+    this.wss.on('connection', (socket) => {
       const clientId = randomUUID();
       const client: ClientConnection = {
         id: clientId,
@@ -47,6 +63,7 @@ class LoungeServer {
         isAlive: true,
         connectedAt: Date.now(),
         lastPingSeq: 0,
+        username: `Player_${clientId.substring(0, 6)}`,
         metadata: {},
       };
 
@@ -61,11 +78,25 @@ class LoungeServer {
       );
       this.sendTo(client, connectMsg);
 
-      // Broadcast join to others
+      // Add player to registry and broadcast join
+      const playerState = this.playerRegistry.addPlayer(clientId, client.username);
+
+      // Send full state to new player
+      const allPlayers = this.playerRegistry.getAllPlayers();
+      this.sendTo(
+        client,
+        createMessage<PlayerStateMessage>(
+          PlayerMessageType.PLAYER_STATE,
+          { players: allPlayers },
+          'server'
+        )
+      );
+
+      // Broadcast new player to others
       this.broadcast(
-        createMessage<ConnectMessage>(
-          SystemMessageType.CONNECT,
-          { clientId, serverTime: Date.now() },
+        createMessage<PlayerJoinMessage>(
+          PlayerMessageType.PLAYER_JOIN,
+          playerState,
           'server'
         ),
         clientId
@@ -108,23 +139,75 @@ class LoungeServer {
           'server'
         );
         this.sendTo(client, pongMsg);
-        break;
+        return;
 
       case SystemMessageType.PONG:
         client.isAlive = true;
+        return;
+    }
+
+    // Handle player messages
+    if (isPlayerMessage(msg)) {
+      this.handlePlayerMessage(client, msg);
+      return;
+    }
+
+    // Unknown application messages - broadcast to all other clients
+    this.broadcast(msg, client.id);
+  }
+
+  private handlePlayerMessage(client: ClientConnection, msg: BaseMessage): void {
+    switch (msg.type) {
+      case PlayerMessageType.PLAYER_POSITION: {
+        const posMsg = msg as PlayerPositionMessage;
+        const { position, rotation } = posMsg.payload;
+        this.playerRegistry.updatePosition(client.id, position, rotation);
         break;
+      }
+
+      case PlayerMessageType.REQUEST_FULL_STATE: {
+        const allPlayers = this.playerRegistry.getAllPlayers();
+        this.sendTo(
+          client,
+          createMessage<PlayerStateMessage>(
+            PlayerMessageType.PLAYER_STATE,
+            { players: allPlayers },
+            'server'
+          )
+        );
+        break;
+      }
+
+      case PlayerMessageType.PLAYER_STATUS_CHANGE: {
+        const payload = msg.payload as { status: 'active' | 'idle' | 'away' };
+        this.playerRegistry.updateStatus(client.id, payload.status);
+        // Broadcast status change to all
+        this.broadcast(msg);
+        break;
+      }
 
       default:
-        // Application messages - broadcast to all other clients
-        this.broadcast(msg, client.id);
+        console.warn(`[Server] Unknown player message type: ${msg.type}`);
     }
   }
 
   private handleDisconnect(client: ClientConnection, code: number, reason: string): void {
     console.log(`[Server] Client disconnected: ${client.id} (code: ${code}, reason: ${reason})`);
+
+    // Remove from registry
+    this.playerRegistry.removePlayer(client.id);
     this.clients.delete(client.id);
 
-    // Broadcast disconnect to remaining clients
+    // Broadcast player leave
+    this.broadcast(
+      createMessage<PlayerLeaveMessage>(
+        PlayerMessageType.PLAYER_LEAVE,
+        { id: client.id, reason },
+        'server'
+      )
+    );
+
+    // Also broadcast system disconnect
     this.broadcast(
       createMessage<DisconnectMessage>(
         SystemMessageType.DISCONNECT,
@@ -153,13 +236,39 @@ class LoungeServer {
     }
   }
 
+  private startPlayerBroadcast(): void {
+    this.playerRegistry.start((updates: PlayerPositionUpdate[], serverTime: number) => {
+      if (updates.length > 0) {
+        this.broadcast(
+          createMessage<PlayerBatchPositionMessage>(
+            PlayerMessageType.PLAYER_BATCH_POSITION,
+            { updates, serverTime },
+            'server'
+          )
+        );
+      }
+    });
+  }
+
   private startHeartbeat(): void {
     this.heartbeatInterval = setInterval(() => {
       for (const [id, client] of this.clients) {
         if (!client.isAlive) {
           console.log(`[Server] Client ${id} failed heartbeat, terminating`);
           client.socket.terminate();
+
+          // Clean up player
+          this.playerRegistry.removePlayer(id);
           this.clients.delete(id);
+
+          // Broadcast leave
+          this.broadcast(
+            createMessage<PlayerLeaveMessage>(
+              PlayerMessageType.PLAYER_LEAVE,
+              { id, reason: 'heartbeat timeout' },
+              'server'
+            )
+          );
           this.broadcast(
             createMessage<DisconnectMessage>(
               SystemMessageType.DISCONNECT,
@@ -180,6 +289,8 @@ class LoungeServer {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
     }
+
+    this.playerRegistry.stop();
 
     for (const client of this.clients.values()) {
       client.socket.close(CloseCode.GOING_AWAY, 'Server shutting down');
